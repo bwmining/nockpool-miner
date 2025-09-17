@@ -22,11 +22,14 @@ use tracing::{error, info};
 use std::sync::Arc;
 use quiver::types::{Template, Submission, Target};
 use bytes::Bytes;
+#[cfg(feature = "cuda")]
+use rustacuda::{init, CudaFlags};
 
 #[tokio::main]
 async fn main() {
     tracer::init();
-
+    #[cfg(feature = "cuda")]
+    init(CudaFlags::empty());
     let config = Config::parse();
 
     if config.benchmark {

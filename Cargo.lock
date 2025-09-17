@@ -1287,6 +1287,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "cuda-config"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ee74643f7430213a1a78320f88649de309b20b80818325575e393f848f79f5d"
+dependencies = [
+ "glob",
+]
+
+[[package]]
+name = "cuda-driver-sys"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d4c552cc0de854877d80bcd1f11db75d42be32962d72a6799b88dcca88fffbd"
+dependencies = [
+ "cuda-config",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3865,6 +3883,8 @@ dependencies = [
  "quiver",
  "rand 0.8.5",
  "reqwest 0.11.27",
+ "rustacuda",
+ "rustacuda_derive",
  "rustls 0.23.29",
  "serde",
  "serde_json",
@@ -5015,6 +5035,35 @@ checksum = "e7295b7ce3bf4806b419dc3420745998b447178b7005e2011947b38fc5aa6791"
 dependencies = [
  "cfg-if",
  "ordered-multimap",
+]
+
+[[package]]
+name = "rustacuda"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47208516ab5338b592d63560e90eaef405d0ec880347eaf7742d893b0a31e228"
+dependencies = [
+ "bitflags 1.3.2",
+ "cuda-driver-sys",
+ "rustacuda_core",
+ "rustacuda_derive",
+]
+
+[[package]]
+name = "rustacuda_core"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3858b08976dc2f860c5efbbb48cdcb0d4fafca92a6ac0898465af16c0dbe848"
+
+[[package]]
+name = "rustacuda_derive"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43ce8670a1a1d0fc2514a3b846dacdb65646f9bd494b6674cfacbb4ce430bd7e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -6331,7 +6380,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "319c70195101a93f56db4c74733e272d720768e13471f400c78406a326b172b0"
 dependencies = [
  "cc",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
