@@ -3854,7 +3854,7 @@ dependencies = [
 
 [[package]]
 name = "nockpool-miner"
-version = "0.1.0"
+version = "0.5.2"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -4680,7 +4680,7 @@ dependencies = [
 [[package]]
 name = "quiver"
 version = "0.1.0"
-source = "git+https://github.com/swpsco/quiver.git?rev=ca175a5e776bef661d8972e5ad88927b78622e24#ca175a5e776bef661d8972e5ad88927b78622e24"
+source = "git+https://github.com/swpsco/quiver.git?rev=629366bd292d14d6ee43026e3107e7cf934f4f9c#629366bd292d14d6ee43026e3107e7cf934f4f9c"
 dependencies = [
  "anyhow",
  "async-trait",

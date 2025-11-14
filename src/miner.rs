@@ -1,6 +1,5 @@
 use crate::config::Config;
 use crate::hot_loader::HotLibrary;
-use crate::jam_loader::load_kernel_from_env;
 
 use kernels::miner::KERNEL;
 use nockvm::jets::hot::HotEntry;
@@ -51,9 +50,11 @@ impl ProofRateTracker {
         }
     }
 
-    pub fn add_proof(&mut self) {
+    pub fn add_proofs(&mut self, count: u32) {
         let now = Instant::now();
-        self.proof_timestamps.push_back(now);
+        for _ in 0..count {
+            self.proof_timestamps.push_back(now);
+        }
         self.clean_old_proofs(now);
     }
 
@@ -106,11 +107,44 @@ pub fn get_current_proof_rate() -> f64 {
     0.0
 }
 
+static PROOF_INCREMENT: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+
+/// Get the proof increment based on compiler feature and config
+fn get_proof_increment(config: &Config) -> u32 {
+    if config.no_gpu {
+        // Force CPU mode
+        1
+    } else if cfg!(feature = "gpu") {
+        // Compiled with GPU feature, use 100x multiplier
+        100
+    } else {
+        // CPU build, use normal counting
+        1
+    }
+}
+
+/// Get the stored proof increment value
+fn get_proof_increment_cached() -> u32 {
+    *PROOF_INCREMENT.get().unwrap_or(&1)
+}
+
 pub async fn start(
     config: Config,
     mut template_rx: watch::Receiver<Template>,
     submission_tx: watch::Sender<Submission>,
 ) -> Result<()> {
+    // Calculate and store proof increment based on compiler feature
+    let proof_increment = get_proof_increment(&config);
+    let _ = PROOF_INCREMENT.set(proof_increment);
+
+    // Log build type and proof rate
+    if config.no_gpu {
+        info!("GPU mining disabled by --no-gpu flag, using CPU mode (1x proof rate)");
+    } else if cfg!(feature = "gpu") {
+        info!("GPU build detected, using GPU proof rate multiplier ({}x)", proof_increment);
+    } else {
+        info!("CPU build detected, using CPU mode (1x proof rate)");
+    }
     let num_threads = {
         let sys = System::new_all();
         let logical_cores = sys.cpus().len() as u32;
@@ -179,12 +213,14 @@ pub async fn start(
     {
         let proof_rate_tracker_clone = proof_rate_tracker.clone();
         tokio::spawn(async move {
+            let start_time = std::time::Instant::now();
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
             loop {
                 interval.tick().await;
                 let mut tracker = proof_rate_tracker_clone.lock().await;
                 let current_rate = tracker.get_proof_rate();
-                if current_rate > 0.0 {
+                // Only show proof rate after first 5 minutes
+                if current_rate > 0.0 && start_time.elapsed() >= std::time::Duration::from_secs(300) {
                     info!("Current mining rate: {:.4} proofs/sec", current_rate);
                 }
             }
@@ -240,6 +276,7 @@ pub async fn start(
                                 // Add miss to proof rate tracker so device_proof_rate includes all attempts
                                 {
                                     let mut tracker = proof_rate_tracker.lock().await;
+<<<<<<< HEAD
 
                                     //this is the number of proof computed on gpu before to give up and return with %miss
                                     let range = Range {start: 0, end: 100};
@@ -247,6 +284,9 @@ pub async fn start(
                                     for _ in range {
                                         tracker.add_proof();
                                     }
+=======
+                                    tracker.add_proofs(get_proof_increment_cached());
+>>>>>>> upstream/master
                                 }
 
                                 let mut nonce_slab = NounSlab::new();
@@ -308,12 +348,7 @@ pub async fn start(
                             // Update proof rate tracker
                             {
                                 let mut tracker = proof_rate_tracker.lock().await;
-                                //this is the number of proof computed on gpu before to give up and return with %miss
-                                let range = Range {start: 0, end: 100};
-
-                                for _ in range {
-                                    tracker.add_proof();
-                                }
+                                tracker.add_proofs(get_proof_increment_cached());
                                 let current_rate = tracker.get_proof_rate();
                                 info!(
                                     "solution found on thread={id} for target={:?}. Proof size: {:?} KB. Current rate: {:.4} proofs/sec. Submitting to nockpool.",
@@ -346,16 +381,8 @@ pub async fn start(
                 *(mining_data.lock().await) = Some(template);
 
                 if mining_attempts.is_empty() {
-                    let kernel_bytes = match load_kernel_from_env() {
-                        Ok(k) => {
-                            info!("Using external miner.jam kernel");
-                            k
-                        }
-                        Err(_) => {
-                            info!("External miner.jam not found, using embedded kernel");
-                            Vec::from(KERNEL)
-                        }
-                    };
+                    let kernel_bytes = Vec::from(KERNEL);
+                    info!("Using embedded kernel");
                     let mut init_tasks = tokio::task::JoinSet::<(u64, Result<SerfThread<SaveableCheckpoint>, anyhow::Error>)>::new();
                     for i in 0..num_threads {
                         let kernel = kernel_bytes.clone();
@@ -560,18 +587,9 @@ pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Resul
         num_threads, benchmark_proofs
     );
 
-    let mut benchmark_tasks =
-        tokio::task::JoinSet::<(u64, Result<tokio::time::Duration, anyhow::Error>)>::new();
-    let kernel_bytes = match load_kernel_from_env() {
-        Ok(k) => {
-            info!("Using external miner.jam kernel");
-            k
-        }
-        Err(_) => {
-            info!("External miner.jam not found, using embedded kernel");
-            Vec::from(KERNEL)
-        }
-    };
+    let mut benchmark_tasks = tokio::task::JoinSet::<(u64, Result<tokio::time::Duration, anyhow::Error>)>::new();
+    let kernel_bytes = Vec::from(KERNEL);
+    info!("Using embedded kernel");
     // Initialize threads first, like the mining code does
     let mut init_tasks =
         tokio::task::JoinSet::<(u32, Result<SerfThread<SaveableCheckpoint>, anyhow::Error>)>::new();
