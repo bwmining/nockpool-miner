@@ -276,17 +276,7 @@ pub async fn start(
                                 // Add miss to proof rate tracker so device_proof_rate includes all attempts
                                 {
                                     let mut tracker = proof_rate_tracker.lock().await;
-<<<<<<< HEAD
-
-                                    //this is the number of proof computed on gpu before to give up and return with %miss
-                                    let range = Range {start: 0, end: 100};
-
-                                    for _ in range {
-                                        tracker.add_proof();
-                                    }
-=======
                                     tracker.add_proofs(get_proof_increment_cached());
->>>>>>> upstream/master
                                 }
 
                                 let mut nonce_slab = NounSlab::new();
