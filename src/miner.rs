@@ -1,5 +1,6 @@
 use crate::config::Config;
-use crate::hot_loader::HotLibrary;
+use crate::hot_loader::{register_hot_library, request_gpu_cancel, HotLibrary};
+use crate::jam_loader::load_kernel_from_env;
 
 use kernels::miner::KERNEL;
 use nockvm::jets::hot::HotEntry;
@@ -8,6 +9,7 @@ use quiver::types::{Submission, Target, Template};
 use anyhow::Result;
 use bytes::Bytes;
 use rand::Rng;
+use rustacuda::{CudaFlags, init};
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::time::{Duration, Instant};
@@ -27,6 +29,7 @@ use nockvm::interpreter::NockCancelToken;
 use nockvm::noun::{Atom, D, T};
 
 use zkvm_jetpack::form::PRIME;
+
 
 use nockvm_macros::tas;
 
@@ -107,6 +110,29 @@ pub fn get_current_proof_rate() -> f64 {
     0.0
 }
 
+/// Exposed through the C ABI so GPU workers can update the proof tracker without
+/// unwinding their execution context.
+#[no_mangle]
+pub extern "C" fn nockminer_report_proofs(count: u32) {
+    if count == 0 {
+        return;
+    }
+
+    match GLOBAL_PROOF_RATE_TRACKER.get() {
+        Some(tracker) => match tracker.try_lock() {
+            Ok(mut guard) => guard.add_proofs(count),
+            Err(_) => warn!(
+                "Unable to acquire proof tracker lock; dropping GPU callback with count={}",
+                count
+            ),
+        },
+        None => warn!(
+            "Proof tracker not initialized yet; dropping GPU callback with count={}",
+            count
+        ),
+    }
+}
+
 static PROOF_INCREMENT: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
 
 /// Get the proof increment based on compiler feature and config
@@ -115,8 +141,8 @@ fn get_proof_increment(config: &Config) -> u32 {
         // Force CPU mode
         1
     } else if cfg!(feature = "gpu") {
-        // Compiled with GPU feature, use 100x multiplier
-        100
+        // Compiled with GPU feature, use 0 since a callback was added to let the GPU call increment by itself
+        0
     } else {
         // CPU build, use normal counting
         1
@@ -141,7 +167,8 @@ pub async fn start(
     if config.no_gpu {
         info!("GPU mining disabled by --no-gpu flag, using CPU mode (1x proof rate)");
     } else if cfg!(feature = "gpu") {
-        info!("GPU build detected, using GPU proof rate multiplier ({}x)", proof_increment);
+        info!("GPU build detected");
+        init(CudaFlags::empty()).unwrap();
     } else {
         info!("CPU build detected, using CPU mode (1x proof rate)");
     }
@@ -180,9 +207,12 @@ pub async fn start(
         #[cfg(target_os = "linux")]
         {
             // Try to load external library first on Linux
-            match unsafe { HotLibrary::load_auto() } {
+            match unsafe { HotLibrary::load_auto(
+                Some(nockminer_report_proofs)) } {
                 Ok(lib) => {
                     info!("Successfully loaded external libzkvm_jetpack.so");
+                    let lib = std::sync::Arc::new(lib);
+                    register_hot_library(lib.clone());
                     let hot_state: &[HotEntry] = lib.jets();
                     hot_state.to_vec()
                 }
@@ -371,7 +401,7 @@ pub async fn start(
                 *(mining_data.lock().await) = Some(template);
 
                 if mining_attempts.is_empty() {
-                    let kernel_bytes = Vec::from(KERNEL);
+                    let kernel_bytes = load_kernel_from_env()?;
                     info!("Using embedded kernel");
                     let mut init_tasks = tokio::task::JoinSet::<(u64, Result<SerfThread<SaveableCheckpoint>, anyhow::Error>)>::new();
                     for i in 0..num_threads {
@@ -411,6 +441,7 @@ pub async fn start(
                     // Mining is already running so cancel all the running attemps
                     // which are mining on the old block.
                     info!("New nockpool template! Restarting {} mining threads", num_threads);
+                    request_gpu_cancel();
                     for token in &cancel_tokens {
                         token.cancel();
                     }
@@ -515,10 +546,11 @@ async fn mine(
     );
 
     slab.set_root(noun);
-
+    
     let wire = WireRepr::new("miner", 1, vec![WireTag::String("candidate".to_string())]);
     mining_attempts.spawn(async move {
         info!("starting mining attempt on thread={id}");
+       
         let result = serf
             .poke(wire.clone(), slab.clone())
             .await
@@ -532,9 +564,11 @@ pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Resul
         #[cfg(target_os = "linux")]
         {
             // Try to load external library first on Linux
-            match unsafe { HotLibrary::load_auto() } {
+            match unsafe { HotLibrary::load_auto(Some(nockminer_report_proofs)) } {
                 Ok(lib) => {
                     info!("Successfully loaded external libzkvm_jetpack.so");
+                    let lib = std::sync::Arc::new(lib);
+                    register_hot_library(lib.clone());
                     let hot_state: &[HotEntry] = lib.jets();
                     hot_state.to_vec()
                 }
